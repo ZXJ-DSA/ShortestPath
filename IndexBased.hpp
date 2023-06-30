@@ -8,23 +8,36 @@
 
 /*-------------Index-based Algorithms--------------*/
 /// CH algorithm
-void Graph::insertEorder(int u,int v,int w){
-    if(E[u].find(v)==E[u].end()){
-        E[u].insert(make_pair(v,make_pair(w,1)));
-        //DD[u]++;
-        //DD2[u]++;
+//function of erasing edge (u,v), i.e., erase u from v's adjacency list.
+void Graph::deleteECore(int u,int v){
+//	if(Emap[u].find(v)!=Emap[u].end()){
+//		Emap[u].erase(Emap[u].find(v));
+//		DD[u]--;
+//	}
+
+    if(E[v].find(u)!=E[v].end()){
+        E[v].erase(E[v].find(u));
+        DD[v]--;
     }
-    else{
+}
+//function of inserting edge (u,v)
+void Graph::insertECore(int u,int v,int w){
+    if(E[u].find(v)==E[u].end()){//if not found
+        E[u].insert(make_pair(v,make_pair(w,1)));
+        DD[u]++;
+//		DD2[u]++;
+    }
+    else{//if found
         if(E[u][v].first>w)
-            E[u][v]=make_pair(w,1);
+            E[u][v]= make_pair(w,1);
         else if(E[u][v].first==w)
             E[u][v].second+=1;
     }
 
     if(E[v].find(u)==E[v].end()){
         E[v].insert(make_pair(u,make_pair(w,1)));
-        //DD[v]++;
-        //DD2[v]++;
+        DD[v]++;
+//		DD2[v]++;
     }
     else{
         if(E[v][u].first>w)
@@ -33,152 +46,104 @@ void Graph::insertEorder(int u,int v,int w){
             E[v][u].second+=1;
     }
 }
-
-void Graph::deleteEorder(int u,int v){
-    if(E[u].find(v)!=E[u].end()){
-        E[u].erase(E[u].find(v));
-        //DD[u]--;
-    }
-
-    if(E[v].find(u)!=E[v].end()){
-        E[v].erase(E[v].find(u));
-        //DD[v]--;
-    }
-}
-
-void Graph::deleteE(int u,int v){
-    if(E[u].find(v)!=E[u].end()){
-        E[u].erase(E[u].find(v));
-        DD[u]--;
-    }
-
-    if(E[v].find(u)!=E[v].end()){
-        E[v].erase(E[v].find(u));
-        DD[v]--;
-    }
-}
-
-void Graph::insertEMTOrderGenerate(int u,int v,int w){
-    if(E[u].find(v)==E[u].end()){
-        E[u].insert(make_pair(v,make_pair(w,1)));
-        DD[u]++;
-        DD2[u]++;
-    }
-}
-void Graph::NeighborComOrderGenerate(vector<pair<int,pair<int,int>>> &Neighvec, pair<int,int> p, int x){
-    sm->wait();
-    int ID1, w1;
-    int ID2, w2;
-    for(int k=p.first;k<p.second;k++){
-        ID1=Neighvec[k].first;
-        for(int h=0;h<Neighvec.size();h++){
-            ID2=Neighvec[h].first;
-            insertEMTOrderGenerate(ID1, ID2, 1);
-        }
-    }
-    sm->notify();
-}
 //function of generating CH shortcuts: MDE-based Elimination
 void Graph::MDEOrderGenerate(string orderfile) {
     cout<<"MDE-based vertex ordering."<<endl;
     Timer tt;
     tt.start();
-    int Twidth=0;//tree width
-    //initialize SCconNodesMT
-    map<int, vector<int>> mi;
-    SCconNodesMT.assign(node_num, mi);
-
     //initialize E
     map<int,pair<int,int>> m;
     E.assign(node_num,m);
     for(int i=0;i<Neighbor.size();i++){
         for(int j=0;j<Neighbor[i].size();j++)
-            E[i].insert(make_pair(Neighbor[i][j].first,make_pair(0,1)));
+            E[i].insert(make_pair(Neighbor[i][j].first,make_pair(Neighbor[i][j].second,1)));
     }
 
-    _DD.assign(node_num,0);_DD2.assign(node_num,0);
-    DD.assign(node_num,0); DD2.assign(node_num,0);
+    _DD_.assign(node_num,0); //_DD2_.assign(nodenum,0);
+    DD.assign(node_num,0); //DD2.assign(nodenum,0);
 
-    set<DegComp> Deg;
+    set<DegComp1> Deg;//min first
+//    vector<bool> active(nodenum,false);//flag that indicate whether a vertex is active for contraction
     int degree;
+    unsigned int Twidth=0;
     for(int i=0;i<node_num;i++){
         degree=Neighbor[i].size();
-        if(degree!=0){
-            _DD[i]=degree;
-            _DD2[i]=degree;
+
+        if(degree > 0){//get degree
+            _DD_[i]=degree;
             DD[i]=degree;
-            DD2[i]=degree;
-            Deg.insert(DegComp(i));
+            Deg.insert(DegComp1(i));
+//            active[i] = true;
+        }else{
+            cout<<"Wrong!! Degree of "<<i<<" is "<<degree<<endl;
+            exit(1);
         }
     }
 
-    vector<bool> exist; exist.assign(node_num,true);
-    vector<bool> change; change.assign(node_num,false);
+    vNodeOrder.clear();
+    vector<bool> existCore;
+    existCore.assign(node_num,true);//if in the core, all vertices is originally in core
+    vector<bool> change;
+    change.assign(node_num,false);//whether the neighbor (degree) has changed
 
     vector<pair<int,pair<int,int>>> vect;
-    NeighborCon.assign(node_num,vect); //NeighborCon.clear();
-    //SCconNodes.clear();
+    NeighborCon.assign(node_num,vect);//temporal graph to store Neighbors in the core, for graph contraction
 
-    //cout<<"Begin to contract"<<endl;
+    bool CutLabel=false;
     int count=0;
-    int step=node_num/10000;
-    step=step*2000;
+    int ID1,ID2;
 
+    //Get the order of all vertices by MDE
     while(!Deg.empty()){
-        if(count%step==0)
-            cout<<"count "<<count<<" , treewidth "<<Twidth<<endl;
         count+=1;
-        int x=(*Deg.begin()).x;
+        int x=(*Deg.begin()).x;//minimum degree first
 
-        while(true){
-            if(change[x]){
-                Deg.erase(DegComp(x));
-                _DD[x]=DD[x];
-                _DD2[x]=DD2[x];
-                Deg.insert(DegComp(x));
-                change[x]=false;
-                x=(*Deg.begin()).x;
-            }else
-                break;
+        while(change[x]){//update the degree if it is changed
+            Deg.erase(DegComp1(x));
+            _DD_[x]=DD[x];
+            Deg.insert(DegComp1(x));
+            change[x]=false;
+            x=(*Deg.begin()).x;
         }
 
-        vNodeOrder.push_back(x);
+        vNodeOrder.push_back(x);//least important vertex first
         Deg.erase(Deg.begin());
-        exist[x]=false;
 
         vector<pair<int,pair<int,int>>> Neigh; //Neigh.clear();
-
         for(auto it=E[x].begin();it!=E[x].end();it++){
-            if(exist[(*it).first]){
+            if(existCore[(*it).first]){
                 Neigh.push_back(*it);
             }
         }
-
-        if(Neigh.size()>Twidth)
-            Twidth=Neigh.size();
-
         NeighborCon[x].assign(Neigh.begin(),Neigh.end());
 
-        //multi threads for n^2 combination
-        for(int i=0;i<Neigh.size();i++){
-            int y=Neigh[i].first;
-            deleteE(x,y);
-            change[y]=true;
+        if(Twidth<Neigh.size()){
+            Twidth = Neigh.size();
         }
 
-        int stepf=Neigh.size()/threadnum;
-        boost::thread_group threadf;
-        for(int i=0;i<threadnum;i++){
-            pair<int,int> p;
-            p.first=i*stepf;
-            if(i==threadnum-1)
-                p.second=Neigh.size();
-            else
-                p.second=(i+1)*stepf;
-            threadf.add_thread(new boost::thread(&Graph::NeighborComOrderGenerate, this, boost::ref(Neigh), p, x));
+
+        /// if still need to contract
+        existCore[x]=false;
+        //delete the star
+        for(int i=0;i<Neigh.size();i++){
+            int y=Neigh[i].first;
+            deleteECore(x,y);//delete x from y's adjacency list
+            change[y]=true;
         }
-        threadf.join_all();
+        //add all-pair neighbors
+        for(int i=0;i<Neigh.size();i++){
+            ID1=Neigh[i].first;
+            for(int j=i+1;j<Neigh.size();j++){
+                ID2=Neigh[j].first;
+                insertECore(ID1,ID2,Neigh[i].second.first+Neigh[j].second.first);
+
+                change[ID1]=true;
+                change[ID2]=true;
+            }
+        }
+
     }
+
 
     NodeOrder.assign(node_num,-1);
     for(int k=0;k<vNodeOrder.size();k++){
@@ -197,6 +162,55 @@ void Graph::MDEOrderGenerate(string orderfile) {
     }
 
     cout<<"Time for node ordering: "<<tt.GetRuntime()<<" s. treewidth "<<Twidth<<endl;
+}
+//Degree-based Ordering
+void Graph::DegreeOrderGenerate(string orderfile){
+    cout<<"Degree-based vertex ordering."<<endl;
+    Timer tt;
+    tt.start();
+    NodeOrder.assign(node_num,-1);
+    vNodeOrder.assign(node_num,-1);
+
+    set<CompInt> Deg;
+    int degree;
+    for(int i=0;i<node_num;i++){
+        degree=Neighbor[i].size();
+        if(degree!=0){
+            Deg.insert(CompInt(i,degree));
+        }else{
+            cout<<"Degree 0! "<<i<<endl;
+            exit(1);
+        }
+    }
+    int id, rank=0;
+    while(!Deg.empty()){
+        id=Deg.begin()->id;
+        NodeOrder[id]=rank;
+        vNodeOrder[rank]=id;
+        ++rank;
+        Deg.erase(Deg.begin());
+    }
+    if(rank!=node_num){
+        cout<<"Not all vertices are ranked! "<<rank<<" "<<node_num<<endl;
+        exit(1);
+    }
+    tt.stop();
+
+//    for(int i=node_num-1;i>node_num-5;--i){
+//        cout<<"rank "<<i<<": "<<vNodeOrder[i]<<" "<<Neighbor[vNodeOrder[i]].size()<<endl;
+//    }
+
+    int ifWrite=false;
+//    ifWrite=true;
+    if(ifWrite){
+        ofstream ofile(orderfile);
+        ofile << node_num << endl;
+        for(int i = 0; i < NodeOrder.size(); i++)
+            ofile << i << "\t" << NodeOrder[i] << endl;
+        ofile.close();
+    }
+
+    cout<<"Time for node ordering: "<<tt.GetRuntime()<<" s."<<endl;
 }
 
 int Graph::writeShortCutorder(string filename){
@@ -583,54 +597,71 @@ int Graph::CH(int ID1, int ID2){
 }
 
 /// PLL
-void Graph::DegreeOrderGenerate(string orderfile){
-    cout<<"Degree-based vertex ordering."<<endl;
+//PLL construction entry
+void Graph::PLLConstruction(int strategy){
+    string indexfile=graph_path+".PLL";
+    string PPRfile=graph_path+".PPR";
+
+    VertexOrdering(strategy);
+
+//    fstream file;
+//    file.open(indexfile);
+//    if(!file){
+        std::chrono::high_resolution_clock::time_point t1, t2;
+        std::chrono::duration<double> time_span;
+        double runT;
+
+        t1=std::chrono::high_resolution_clock::now();
+        PLLConstruct();
+        t2=std::chrono::high_resolution_clock::now();
+        time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2-t1);
+        runT= time_span.count();
+        cout<<"PLL construction time: "<<runT<<" s."<<endl;
+
+//        writePLL(indexfile, PPRfile);
+//    }
+//    else
+//    {
+//        readPLL(indexfile, PPRfile);
+//    }
+}
+//PLL construction function
+void Graph::PLLConstruct(){
+    unordered_map<int,int> m; m.clear();
+    Label.assign(node_num,m);
+
+    unordered_map<int,vector<int>> unorderm; unorderm.clear();
+//    PruningPointNew.assign(node_num,unorderm);
+
+
+    int ID;
+    int cnt=0;
+    int stepShow = ceil(node_num/10000)*2000;
+    stepShow = max(stepShow,1000);
+    cout<<"Step for show: "<<stepShow<<endl;
+
     Timer tt;
     tt.start();
-    NodeOrder.assign(node_num,-1);
-    vNodeOrder.assign(node_num,-1);
+    for(int i=node_num-1;i>=0;i--){//start from the least important vertex
 
-    set<CompInt> Deg;
-    int degree;
-    for(int i=0;i<node_num;i++){
-        degree=Neighbor[i].size();
-        if(degree!=0){
-            Deg.insert(CompInt(i,degree));
-        }else{
-            cout<<"Degree 0! "<<i<<endl;
-            exit(1);
+        ID=vNodeOrder[i];
+
+        vector<pair<int,int>> vp;
+        DijksPrune1(ID,vp);
+        if(cnt%stepShow==0){
+            tt.stop();
+            cout<<"Node "<<cnt<<": "<<ID<<" ; vp.size: "<<vp.size()<<"; time: "<<tt.GetRuntime()<<" s."<<endl;
+            tt.start();
+            //cout<<"ID "<<ID<<" vp.size "<<vp.size()<<endl;
+        }
+        cnt+=1;
+        for(int j=0;j<vp.size();j++){
+            Label[vp[j].first].insert(make_pair(ID, vp[j].second));
+            //cout<<vp[j].first<<" "<<vp[j].second<<endl;
         }
     }
-    int id, rank=0;
-    while(!Deg.empty()){
-        id=Deg.begin()->id;
-        NodeOrder[id]=rank;
-        vNodeOrder[rank]=id;
-        ++rank;
-        Deg.erase(Deg.begin());
-    }
-    if(rank!=node_num){
-        cout<<"Not all vertices are ranked! "<<rank<<" "<<node_num<<endl;
-        exit(1);
-    }
-    tt.stop();
-
-//    for(int i=node_num-1;i>node_num-5;--i){
-//        cout<<"rank "<<i<<": "<<vNodeOrder[i]<<" "<<Neighbor[vNodeOrder[i]].size()<<endl;
-//    }
-
-    int ifWrite=false;
-//    ifWrite=true;
-    if(ifWrite){
-        ofstream ofile(orderfile);
-        ofile << node_num << endl;
-        for(int i = 0; i < NodeOrder.size(); i++)
-            ofile << i << "\t" << NodeOrder[i] << endl;
-        ofile.close();
-    }
-
-    cout<<"Time for node ordering: "<<tt.GetRuntime()<<" s."<<endl;
 }
+
 void Graph::writePLL(string filename, string filenameP){
     ofstream OF(filename);
     if(!OF){
@@ -647,22 +678,22 @@ void Graph::writePLL(string filename, string filenameP){
         OF<<endl;
     }
     OF.close();
-    ofstream OF1(filenameP);
-    for(int nodeID=0;nodeID<node_num;nodeID++){
-        OF1<<nodeID<<" "<<PruningPointNew[nodeID].size();///PruningPointNew
-        for(auto itp=PruningPointNew[nodeID].begin();itp!=PruningPointNew[nodeID].end();itp++){
-            OF1<<" "<<(*itp).first<<" "<<(*itp).second.size();
-//			for(int k=0;k<(*itp).second.size();k++){
-//				OF1<<" "<<(*itp).second[k];
-//			}
-            for(auto k=itp->second.begin();k!=itp->second.end();k++){
-                int temp1=*k;
-                OF1<<" "<< temp1;
-            }
-        }
-        OF1<<endl;
-    }
-    OF1.close();
+//    ofstream OF1(filenameP);
+//    for(int nodeID=0;nodeID<node_num;nodeID++){
+//        OF1<<nodeID<<" "<<PruningPointNew[nodeID].size();///PruningPointNew
+//        for(auto itp=PruningPointNew[nodeID].begin();itp!=PruningPointNew[nodeID].end();itp++){
+//            OF1<<" "<<(*itp).first<<" "<<(*itp).second.size();
+////			for(int k=0;k<(*itp).second.size();k++){
+////				OF1<<" "<<(*itp).second[k];
+////			}
+//            for(auto k=itp->second.begin();k!=itp->second.end();k++){
+//                int temp1=*k;
+//                OF1<<" "<< temp1;
+//            }
+//        }
+//        OF1<<endl;
+//    }
+//    OF1.close();
     cout<<"Finish index writing!"<<endl;
 }
 void Graph::readPLL(string filename, string filenameP){
@@ -691,25 +722,25 @@ void Graph::readPLL(string filename, string filenameP){
     }
     IF.close();
     unordered_map<int,vector<int>> unorderm; unorderm.clear();
-    PruningPointNew.assign(num,unorderm);
+//    PruningPointNew.assign(num,unorderm);
 
-    ifstream IF1(filenameP);
-
-    int pairnum, pairsize;
-    int c,u;
-    for(int i=0;i<num;i++){
-        IF1>>nodeID>>pairnum;
-        for(int p=0;p<pairnum;p++){
-            IF1>>c>>pairsize;
-            vector<int> vec;
-            for(int k=0;k<pairsize;k++){
-                IF1>>u;
-                vec.push_back(u);
-            }
-            PruningPointNew[nodeID][c]=vec;
-        }
-    }
-    IF1.close();
+//    ifstream IF1(filenameP);
+//
+//    int pairnum, pairsize;
+//    int c,u;
+//    for(int i=0;i<num;i++){
+//        IF1>>nodeID>>pairnum;
+//        for(int p=0;p<pairnum;p++){
+//            IF1>>c>>pairsize;
+//            vector<int> vec;
+//            for(int k=0;k<pairsize;k++){
+//                IF1>>u;
+//                vec.push_back(u);
+//            }
+//            PruningPointNew[nodeID][c]=vec;
+//        }
+//    }
+//    IF1.close();
     cout<<"PLL index finish reading!"<<endl;
 }
 //query processing with current PLL index
@@ -783,73 +814,6 @@ void Graph::DijksPrune1(int nodeID, vector<pair<int,int>>& vp){
     }
 }
 
-void Graph::PLLConstruct(){
-    unordered_map<int,int> m; m.clear();
-    Label.assign(node_num,m);
-
-    unordered_map<int,vector<int>> unorderm; unorderm.clear();
-    PruningPointNew.assign(node_num,unorderm);
-
-
-    int ID;
-    int cnt=0;
-    int stepShow = ceil(node_num/10000)*2000;
-    stepShow = max(stepShow,1000);
-    cout<<"Step for show: "<<stepShow<<endl;
-
-    Timer tt;
-    tt.start();
-    for(int i=node_num-1;i>=0;i--){//start from the least important vertex
-
-        ID=vNodeOrder[i];
-
-        vector<pair<int,int>> vp;
-        DijksPrune1(ID,vp);
-        if(cnt%stepShow==0){
-            tt.stop();
-            cout<<"Node "<<cnt<<": "<<ID<<" ; vp.size: "<<vp.size()<<"; time: "<<tt.GetRuntime()<<" s."<<endl;
-            tt.start();
-            //cout<<"ID "<<ID<<" vp.size "<<vp.size()<<endl;
-        }
-        cnt+=1;
-        for(int j=0;j<vp.size();j++){
-            Label[vp[j].first].insert(make_pair(ID, vp[j].second));
-            //cout<<vp[j].first<<" "<<vp[j].second<<endl;
-        }
-    }
-}
-
-//the original construction method of PLL
-void Graph::PLLConstruction(){
-    string indexfile=graph_path+".PLL";
-    string orderfile=graph_path+".order";
-    string PPRfile=graph_path+".PPR";
-    MDEOrderGenerate(orderfile);// for road networks
-//    DegreeOrderGenerate(orderfile);// for small-world networks
-
-//    fstream file;
-//    file.open(indexfile);
-//    if(!file){
-        std::chrono::high_resolution_clock::time_point t1, t2;
-        std::chrono::duration<double> time_span;
-        double runT;
-
-        t1=std::chrono::high_resolution_clock::now();
-        PLLConstruct();
-        t2=std::chrono::high_resolution_clock::now();
-        time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2-t1);
-        runT= time_span.count();
-        cout<<"PLL construction time: "<<runT<<" s."<<endl;
-
-//        writePLL(indexfile, PPRfile);
-//    }
-//    else
-//    {
-//        readPLL(indexfile, PPRfile);
-//    }
-}
-
-
 //function of PLL query
 int Graph::PLL(int ID1, int ID2){
     if(ID1==ID2) return 0;
@@ -872,5 +836,245 @@ int Graph::PLL(int ID1, int ID2){
 }
 
 
+/// PSL
+// PSL construction entry
+void Graph::PSLConstruction(int strategy){
+    string indexfile=graph_path+".PSL";
+    string PPRfile=graph_path+"PSL.PPR";
+
+    VertexOrdering(strategy);
+
+//    fstream file;
+//    file.open(indexfile);
+//    if(!file){
+    std::chrono::high_resolution_clock::time_point t1, t2;
+    std::chrono::duration<double> time_span;
+    double runT;
+
+    t1=std::chrono::high_resolution_clock::now();
+    PSLConstruct();
+    t2=std::chrono::high_resolution_clock::now();
+    time_span = std::chrono::duration_cast<std::chrono::duration<double>>(t2-t1);
+    runT= time_span.count();
+    cout<<"PSL construction time: "<<runT<<" s."<<endl;
+
+//        writePLL(indexfile, PPRfile);
+//    }
+//    else
+//    {
+//        readPLL(indexfile, PPRfile);
+//    }
+}
+
+// PSL construction function
+void Graph::PSLConstruct(){
+    unordered_map<int,int> map0; map0.clear();
+    Label.assign(node_num, map0);
+    Dhop.assign(node_num, map0);
+
+    DvertexNew.assign(node_num, true);
+
+    for(int i=0;i<node_num;i++){
+        Label[i].insert(make_pair(i,0));
+        Dhop[i].insert(make_pair(i,0));
+        //Dvectex.push_back(i);
+    }
+
+    //LabelStep.push_back(Dhop);
+    Timer tt;
+    bool flag=true;
+    int step=0;
+    cout<<"step "<<step<<" finish!"<<endl;
+    step+=1;
+    while(flag){
+//		LabelStep.push_back(Dhop);
+        tt.start();
+        flag=DhopLableRefreshStep(step+1);
+        tt.stop();
+        cout<<"step "<<step<<" finish! "<<tt.GetRuntime()<<" s."<< endl;
+        step+=1;
+    }
+    cout<<"Index finish construction"<<endl;
+}
+
+bool Graph::DhopLableRefreshStep(int step){
+    bool flag=false;
+    vector<unordered_map<int,int>> newDhop;
+    unordered_map<int,int> m0; m0.clear();
+    newDhop.assign(node_num,m0);
+    vector<int> newDvec;
+//    vector<vector<tri>> PP;
+//    vector<tri> prp; prp.clear();
+//    PP.assign(threadnum, prp);
+
+    boost::thread_group thread;
+
+    //int stepthr=Dvectex.size()/threadnum; //cout<<" Dvectex size "<<Dvectex.size()<<endl;
+    vector<vector<int>> ProcessID;
+    vector<int> vvv; ProcessID.assign(threadnum,vvv);
+    threadDistribute(ProcessID);
+
+    for(int i=0;i<ProcessID.size();i++){
+        vector<int> p=ProcessID[i];
+        thread.add_thread(new boost::thread(&Graph::labelMultiThread2New, this, boost::ref(newDhop), p,step));
+    }
+    thread.join_all();
+
+    //cout<<"lllllllllllllllllllllllllllllll"<<endl;
+
+    int zerolabel=0;
+    Dhop.assign(newDhop.begin(), newDhop.end());
+    Dvectex.clear(); set<int> Dset;
+    DvertexNew.assign(node_num,false);
+    for(int nodeID=0;nodeID<node_num;nodeID++){
+        if(Dhop[nodeID].size()>0){
+            flag=true;
+            for(unordered_map<int,int>::iterator it=Dhop[nodeID].begin();it!=Dhop[nodeID].end();it++){
+                if(Label[nodeID].find((*it).first)!=Dhop[nodeID].end()){
+                    Label[nodeID][(*it).first]=(*it).second;
+                }else{
+                    Label[nodeID].insert(*it);
+                }
+            }
+            for(int i=0;i<Neighbor[nodeID].size();i++){//Neighbors
+                if(Dset.find(Neighbor[nodeID][i].first)==Dset.end()){
+                    Dset.insert(Neighbor[nodeID][i].first);
+                    //Dvectex.push_back(Neighbors[nodeID][i].first);
+                    DvertexNew[Neighbor[nodeID][i].first]=true;
+                }
+            }
+        }else if(Dhop[nodeID].size()==0)
+            zerolabel+=1;
+    }
+
+    //cout<<"zero "<<zerolabel<<" Vertex to change "<<Dvectex.size()<<endl;
+    return flag;
+}
+
+void Graph::threadDistribute(vector<vector<int>>& processID){
+    int ID;
+    int cnt=0;
+    int threadOrder;
+    int a;
+    for(int r=0;r<node_num;r++){
+        ID=vNodeOrder[r];
+        if(DvertexNew[ID]){
+            a=cnt%(2*threadnum);
+            if(a>=threadnum){
+                threadOrder=2*threadnum-1-a;
+            }else{
+                threadOrder=a;
+            }
+            //cout<<"a "<<a<<" threadOrder "<<threadOrder<<endl;
+            processID[threadOrder].push_back(ID);
+            cnt+=1;
+        }
+    }
+}
+
+void Graph::labelMultiThread2New(vector<unordered_map<int,int>>& newDhop, vector<int>& p,int step){
+//	sm->wait();
+
+    for(int i=0;i<p.size();i++){
+        int nodeID=p[i];
+        unordered_map<int,int> Dhop0; Dhop0.clear();
+        int neighID, neighW;
+        for(int Index=0;Index<Neighbor[nodeID].size();Index++){//Neighbors
+            neighID=Neighbor[nodeID][Index].first;
+            //cout<<"neighID "<<neighID<<" Dhop.size "<<Dhop[neighID].size()<<endl;
+            if(Dhop[neighID].size()>0){
+                neighW=Neighbor[nodeID][Index].second;
+
+                unordered_map<int,int>::iterator it=Dhop[neighID].begin();
+                int hub, dis, d;
+                for(;it!=Dhop[neighID].end();it++){
+                    hub=(*it).first; dis=(*it).second; d=neighW+dis;
+                    if(NodeOrder[hub]>NodeOrder[nodeID]){
+                        int TempDis; vector<int> SupNode;
+//                        ShortestDisQuery1(nodeID, hub,SupNode,TempDis); //cout<<"nodeID "<<nodeID<<" TempDis "<<TempDis<<" d "<<d<<endl;
+                        TempDis = ShortestDisQuery2(nodeID, hub);
+                        if(TempDis>d){
+                            if(Dhop0.find(hub)!=Dhop0.end()){
+                                if(Dhop0[hub]>d) Dhop0[hub]=d;
+                            }else{
+                                Dhop0.insert(make_pair(hub,d));
+                            }
+                        }
+//                        else{
+//                            for(int k=0;k<SupNode.size();k++){
+//                                int supn=SupNode[k];
+//
+//                                if(supn!=nodeID && supn!=hub){
+//                                    vSm[nodeID]->wait();
+//                                    PruningPointNew[nodeID][supn].push_back(hub);
+////									PruningPointStepNew[nodeID][supn].insert(make_pair(hub,step));
+//                                    PruningPointList[nodeID][supn].push_back(hub);
+//
+//                                    vSm[nodeID]->notify();
+//
+//                                    vSm[hub]->wait();
+//                                    PruningPointNew[hub][supn].push_back(nodeID);
+////									PruningPointStepNew[hub][supn].insert(make_pair(nodeID,step));
+//                                    PruningPointList[hub][supn].push_back(nodeID);
+//
+//                                    vSm[hub]->notify();
+//                                }
+//                            }
+//                        }
+
+                    }
+                }
+            }
+        }
+        newDhop[nodeID]=Dhop0;
+    }
+
+    //cout<<"one thread finish running!"<<endl;
+
+//	sm->notify();
+}
+//query by current labels
+int Graph::ShortestDisQuery1(int ID1,int ID2,vector<int>& SupNode, int& d){
+    d=INF;
+    unordered_map<int,int>::iterator it;
+    int hub, dis1, dis2;
+
+    for(it=Label[ID1].begin();it!=Label[ID1].end();it++){
+        hub=(*it).first;
+        dis1=(*it).second;
+        if(Label[ID2].find(hub)!=Label[ID2].end()){
+            dis2=Label[ID2][hub];
+            if(dis1+dis2<d){
+                d=dis1+dis2;
+                SupNode.clear();
+                SupNode.push_back(hub);
+            }else if(dis1+dis2==d){
+                SupNode.push_back(hub);
+            }
+        }
+    }
+
+    return d;
+}
+
+//query by current labels
+int Graph::ShortestDisQuery2(int ID1,int ID2){
+    int d=INF;
+    unordered_map<int,int>::iterator it;
+    int hub, dis1, dis2;
+
+    for(it=Label[ID1].begin();it!=Label[ID1].end();it++){
+        hub=(*it).first;
+        dis1=(*it).second;
+        if(Label[ID2].find(hub)!=Label[ID2].end()){
+            dis2=Label[ID2][hub];
+            if(dis1+dis2<d){
+                d=dis1+dis2;
+            }
+        }
+    }
+
+    return d;
+}
 
 #endif //INDEXBASED_HPP

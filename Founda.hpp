@@ -6,104 +6,6 @@
 
 #include "head.h"
 
-void Graph::GraphDataGen(string filename) {
-    string r_edges = filename + ".original";
-
-    ifstream inFile(r_edges, ios::in);
-    if (!inFile) { // if not exist
-        cout << "Fail to open file" << r_edges << endl;
-        exit(1);
-    }
-
-    string line;
-    int ID1,ID2,weight;
-    int edgeNum=0;
-    int wRange=10;
-
-    getline(inFile,line);
-    istringstream iss(line);
-    char ch;
-    if (!(iss >>  ch >> node_num >> edge_num)){
-        cout<<"Wrong input syntax!"<<endl;
-        exit(1);
-    }
-    cout<<"Node number: "<<node_num<<" ; Edge number: "<<edge_num<<endl;
-    NeighborMap.assign(node_num,unordered_map<int,int>());
-
-    unordered_set<int> set_A; set<int> set_LCC;
-
-    while(getline(inFile,line)){
-        if(line.empty())
-            continue;
-        istringstream iss(line);
-        if (!(iss >> ID1 >> ID2)){
-            cout<<"Wrong input syntax!"<<endl;
-            exit(1);
-        }
-
-        ID1-=1; ID2-=1;
-        weight=rand()%wRange + 1;
-
-        if(ID1>=0 && ID1<node_num && ID2>=0 && ID2<node_num && ID1!=ID2){
-            if(NeighborMap[ID1].find(ID2)==NeighborMap[ID1].end()){//if not found
-                NeighborMap[ID1].insert({ID2,weight});
-                NeighborMap[ID2].insert({ID1,weight});
-                edgeNum+=2;
-                set_A.insert(ID1); set_A.insert(ID2);
-            }
-
-            if(weight<=0){
-                cout<<"Negative edge weight "<<ID1<<" "<<ID2<<" "<<weight<<endl;
-            }
-        }else{
-            cout<<"Graph data is wrong! "<<ID1<<" "<<ID2<<" "<<weight<<endl;
-        }
-    }
-    inFile.close();
-    cout<<"Graph read done."<<endl;
-    cout<<"Set_A: "<<set_A.size()<<"; edgeNum: "<<edgeNum<<endl;
-
-    pair<int,int> nums = DFS_CC(NeighborMap, set_A, set_LCC, node_num);
-    node_num=nums.first, edge_num=nums.second;
-
-    WriteGraph(filename,set_LCC);
-
-}
-
-void Graph::WriteGraph(string filename, set<int>& set_LCC) {
-    ofstream outFile(filename, ios::out);
-    if (!outFile) {
-        cout << "Write File opening failed. " << filename<<endl;
-        assert(outFile);
-        exit(1);
-    }
-    outFile << node_num <<" "<<edge_num<< endl;
-
-    int ID=0;
-    map<int,int> IDMap;//map from old ID to new ID
-
-    for(auto it=set_LCC.begin();it!=set_LCC.end();++it){
-        IDMap.insert({*it,ID});
-        ++ID;
-    }
-    assert(ID==node_num);
-
-    for(auto it=set_LCC.begin();it!=set_LCC.end();++it){
-        ID=*it;
-        for(auto it2=NeighborMap[ID].begin();it2!=NeighborMap[ID].end();++it2){
-            if(IDMap.find(it2->first) != IDMap.end()){
-                outFile<<IDMap[ID]<<" "<<IDMap[it2->first]<<" "<<it2->second<<endl;
-            }else{
-                cout<<"Wrong! "<<ID<<" "<<it2->first<<" "<<it2->second<<endl;
-            }
-
-        }
-    }
-
-    outFile.close();
-    cout<<"Write Done."<<endl;
-
-}
 
 void Graph::ReadGraph(string filename){
     string r_edges = filename;
@@ -115,9 +17,11 @@ void Graph::ReadGraph(string filename){
         exit(1);
     }
 
+    Timer tt;
+    tt.start();
     string line;
     int ID1,ID2,weight;
-    int edgeNum=0;
+    unsigned long long edgeNum=0;
 
     getline(inFile,line);
     istringstream iss(line);
@@ -127,6 +31,11 @@ void Graph::ReadGraph(string filename){
     }
     cout<<"Node number: "<<node_num<<" ; Edge number: "<<edge_num<<endl;
     Neighbor.assign(node_num,vector<pair<int,int>>());
+
+    bool flag_double=true;
+    if(edge_num>1000000000){
+        flag_double= false;
+    }
 
     while(getline(inFile,line)){
         if(line.empty())
@@ -141,8 +50,13 @@ void Graph::ReadGraph(string filename){
 
         if(ID1>=0 && ID1<node_num && ID2>=0 && ID2<node_num){
             Neighbor[ID1].emplace_back(ID2,weight);
-//            Neighbor[ID2].emplace_back(ID1,weight);
-            ++edgeNum;
+            if(!flag_double){
+                Neighbor[ID2].emplace_back(ID1,weight);
+                edgeNum+=2;
+            }else{
+                ++edgeNum;
+            }
+
             if(weight<=0){
                 cout<<"Negative edge weight "<<ID1<<" "<<ID2<<" "<<weight<<endl;
             }
@@ -155,7 +69,8 @@ void Graph::ReadGraph(string filename){
         cout<<"Nominate edge number: "<<edge_num<<" ; real edge number: "<<edgeNum<<endl;
         edge_num=edgeNum;
     }
-    cout<<"Graph read done."<<endl;
+    tt.stop();
+    cout<<"Graph read done. Time: "<<tt.GetRuntime()<<" s."<< endl;
 
     //read coordinates
     if(algo == 3 || algo == 4){
@@ -224,7 +139,7 @@ void Graph::ReadCoordinates(string filename) {
 
 //function of checking the connectivity
 template <class T>
-pair<int,int> Graph::DFS_CC(T & Edges, unordered_set<int> & set_A, set<int> & set_LCC, int nodenum) {
+pair<int,unsigned long long> Graph::DFS_CC(T & Edges, unordered_set<int> & set_A, set<int> & set_LCC, int nodenum) {
     /// DFS for connected component
     stack<int> stack_A;
 //    set<int> set_A;//nodes waiting for visited
@@ -233,9 +148,9 @@ pair<int,int> Graph::DFS_CC(T & Edges, unordered_set<int> & set_A, set<int> & se
     int item_id,temp_id;
     vector<bool> flag_visited(nodenum,false);
     bool flag_finish = false;
-    int temp_num = 0;
+    unsigned long long temp_num = 0;
     int component_i = 0;
-    pair<unordered_set<int>,int> LCC;
+    pair<unordered_set<int>,unsigned long long> LCC;
     vector<int> CCs;//the vertex size of each connected component
 
 //    for(int i=0;i<nodenum;++i){
@@ -355,11 +270,12 @@ void Graph::Preprocess() {
         }
         case 7:{//PLL
             cout<<"PLL algorithm!"<<endl;
-            PLLConstruction();
+            PLLConstruction(orderStrategy);
             break;
         }
         case 8:{//PSL
             cout<<"PSL algorithm!"<<endl;
+            PSLConstruction(orderStrategy);
             break;
         }
 
@@ -502,6 +418,81 @@ void Graph::EfficiencyTest(int num) {
     }
     tt.stop();
     cout<<"Average query time: "<<tt.GetRuntime()*1000/num<<" ms."<<endl;
+}
+
+void Graph::VertexOrdering(int strategy) {
+    string filename=graph_path+".order";
+    switch (strategy) {
+        case 0:{
+            ReadOrder(filename);
+            break;
+        }
+        case 1:{
+            MDEOrderGenerate(filename);// for road networks
+            break;
+        }
+        case 2:{
+            DegreeOrderGenerate(filename);// for small-world networks
+            break;
+        }
+        default:{
+            cout<<"Wrong vertex ordering strategy! "<<strategy<<endl;
+            exit(0);
+        }
+    }
+
+    string orderfile = graph_path + ".order";
+    int ifWrite=false;
+    ifWrite=true;
+    if(ifWrite){
+        ofstream ofile(orderfile);
+        ofile << node_num << endl;
+        for(int i = 0; i < NodeOrder.size(); i++)
+            ofile << i << "\t" << NodeOrder[i] << endl;//ID, order
+        ofile.close();
+    }
+}
+
+void Graph::ReadOrder(string filename){
+    string r_query = filename;
+
+    ifstream inFile(r_query, ios::in);
+    if (!inFile) { // if not exist
+        cout << "Fail to open file" << r_query << endl;
+        exit(1);
+    }
+
+    string line;
+    int ID,order;
+    int nodeNum=0;
+
+    getline(inFile,line);
+    istringstream iss(line);
+    if (!(iss >> nodeNum)){
+        cout<<"Wrong input syntax!"<<endl;
+        exit(1);
+    }
+
+    if(nodeNum != node_num){
+        cout<<"Inconsistent vertex number! "<<nodeNum<<" "<<node_num<<endl;
+        exit(0);
+    }
+
+    NodeOrder.assign(node_num,-1);
+    vNodeOrder.assign(node_num,-1);
+
+    while(getline(inFile,line)){
+        if(line.empty())
+            continue;
+        istringstream iss(line);
+        if (!(iss >> ID >> order)){
+            cout<<"Wrong input syntax!"<<endl;
+            exit(1);
+        }
+        NodeOrder[ID] = order;
+        vNodeOrder[order]= ID;
+    }
+    inFile.close();
 }
 
 #endif //FOUNDA_HPP

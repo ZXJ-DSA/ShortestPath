@@ -22,8 +22,7 @@
 #include <random>
 #include <assert.h>
 #include <boost/thread/thread.hpp>
-#include "Timer.h"
-#include "Semaphore.h"
+#include "Heap.h"
 
 #define INF 99999999
 
@@ -51,17 +50,15 @@ struct CompInt{//minimum value and id first
     }
 };
 
-vector<int> _DD,_DD2;
-struct DegComp{
+vector<int> _DD_;
+struct DegComp1{//min-first
     int x;
-    DegComp(int _x){
+    DegComp1(int _x){
         x=_x;
     }
-    bool operator< (const DegComp d) const{
-        if(_DD[x]!=_DD[d.x])
-            return _DD[x]<_DD[d.x];
-        if(_DD2[x]!=_DD2[x])
-            return _DD2[x]<_DD2[d.x];
+    bool operator< (const DegComp1 d) const{
+        if(_DD_[x]!=_DD_[d.x])
+            return _DD_[x]<_DD_[d.x];
         return x<d.x;
     }
 };
@@ -84,21 +81,20 @@ public:
     vector<vector<pair<int,int>>> Neighbor;//adjacency list of original graph
     vector<Edge> Edges;//edge list for Bellman-Ford algorithm
     vector<unordered_map<int,int>> NeighborMap; //adjacency list of original graph, map version
-
-
     int threadnum = 10;// thread number
+    int algo = 1;
+    int orderStrategy = 2;// 0: read from disk; 1: MDE-based; 2:Degree-based
 
+    /*-------------Preprocessing--------------*/
     void ReadGraph(string filename);
     void ReadCoordinates(string filename);
-
     template <class T>
-    pair<int,int> DFS_CC(T & Edges, unordered_set<int> & set_A, set<int> & set_B, int nodenum);
+    pair<int,unsigned long long> DFS_CC(T & Edges, unordered_set<int> & set_A, set<int> & set_B, int nodenum);
     void ConnectivityCheck();
     void Preprocess();
-    void GraphDataGen(string filename);
-    void WriteGraph(string filename, set<int>& set_LCC);
+    void ReadOrder(string filename);
+    void VertexOrdering(int strategy);//0: Read; 1: MDE; 2: Degree;
 
-    int algo=1;
 
     /*-------------Index-free Algorithms--------------*/
     vector<pair<int,int>> Coordinate;//coordinates of vertex
@@ -129,12 +125,8 @@ public:
     vector<map<int,pair<int,int>>> E;
     vector<vector<pair<int,pair<int,int>>>> NeighborCon;
     vector<map<int, vector<int>>> SCconNodesMT;
-    void deleteEorder(int u,int v);
-    void insertEorder(int u,int v,int w);
-    void deleteE(int u,int v);
-
-    void insertEMTOrderGenerate(int u,int v,int w);
-    void NeighborComOrderGenerate(vector<pair<int,pair<int,int>>> &Neighvec, pair<int,int> p, int x);
+    void deleteECore(int u,int v);
+    void insertECore(int u,int v,int w);
     void MDEOrderGenerate(string orderfile);//MDE-based elimination for vertex ordering
     int writeShortCutorder(string filename);
     int ReadShortCut(string filename);
@@ -145,18 +137,30 @@ public:
 
     /// PLL algorithm
     vector<unordered_map<int,int>> Label;
-    vector<unordered_map<int,vector<int>>> PruningPointNew;//v {c,{u}}
+//    vector<unordered_map<int,vector<int>>> PruningPointNew;//v {c,{u}}
 
+    void PLLConstruction(int strategy);
+    void PLLConstruct();
     void DegreeOrderGenerate(string orderfile);//degree-based vertex ordering
     void writePLL(string filename, string filenameP);
     void readPLL(string filename, string filenameP);
     int PLLDisQuery1(int ID1,int ID2,vector<int>& SupNode, int& d);
     void DijksPrune1(int nodeID, vector<pair<int,int>>& vp);
-    void PLLConstruct();
-    void PLLConstruction();
+
     int PLL(int ID1, int ID2);
 
+    /// PSL algorithm
+    vector<unordered_map<int,int>> Dhop;
+    vector<int> Dvectex;
+    vector<bool> DvertexNew;
 
+    void PSLConstruction(int strategy);
+    void PSLConstruct();
+    bool DhopLableRefreshStep(int step);
+    void labelMultiThread2New(vector<unordered_map<int,int>>& newDhop, vector<int>& p,int step);
+    void threadDistribute(vector<vector<int>>& processID);
+    int ShortestDisQuery1(int ID1,int ID2,vector<int>& SupNode, int& d);
+    int ShortestDisQuery2(int ID1,int ID2);
 
     /*-------------Query Processing--------------*/
     int Query(int ID1, int ID2);
@@ -168,231 +172,6 @@ public:
 
 };
 
-//created by Mengxuan, modified by Xinjie
-namespace benchmark {
 
-#define NULLINDEX 0xFFFFFFFF
-
-    template<int log_k, typename id_t, typename k_t >//id,value
-    class heap {
-    public:
-
-        // Expose types.
-        typedef k_t key_t;
-        typedef id_t node_t;
-
-        // Some constants regarding the elements.
-        //static const node_t NULLINDEX = 0xFFFFFFFF;
-        static const node_t k = 1 << log_k;//equals k = 1*2^log_k, usually log_k = 2, so k = 4
-
-        // A struct defining a heap element.
-        struct element_t {
-            key_t key;
-            node_t element;
-
-            element_t() : key(0), element(0) {}
-
-            element_t(const key_t k, const node_t e) : key(k), element(e) {}
-        };
-
-
-        //public:
-
-        // Constructor of the heap.
-        heap(node_t n) : n(0), max_n(n), elements(n), position(n, NULLINDEX) {//n is the number of elements in current
-            // state, max_n is the size of heap
-        }
-
-        heap(): n(0), max_n(0), elements(0), position(0, NULLINDEX) {}
-
-        ~heap(){}
-
-        // Risize the heap
-        inline void resize(node_t a){
-            n = 0; max_n = a;
-            elements.resize(a);
-            position.resize(a, NULLINDEX);
-        }
-
-        // Size of the heap.
-        inline node_t size() const {
-            return n;
-        }
-
-        // Heap empty?
-        inline bool empty() const {
-            return size() == 0;
-        }
-
-        // Extract min element.
-        inline void extract_min(node_t &element, key_t &key) {
-            assert(!empty());
-
-            element_t &front = elements[0];
-
-            // Assign element and key.
-            element = front.element;
-            key = front.key;
-
-            // Replace elements[0] by last element.
-            position[element] = NULLINDEX;
-            --n;//n=n-1
-            if (!empty()) {
-                front = elements[n];//elements[n] is the top element
-                position[front.element] = 0;//make its position valid, it is also the smallest one
-                sift_down(0);
-            }
-        }
-
-        inline key_t top_key() {//get the key, i.e. minimal cost
-            assert(!empty());
-
-            element_t &front = elements[0];
-
-            return front.key;
-
-        }
-
-        inline node_t top_value() {//get the value, i.e. id number of minimal cost
-
-            assert(!empty());
-
-            element_t &front = elements[0];
-
-            return front.element;
-        }
-
-        // Update an element of the heap.
-        inline void update(const node_t element, const key_t key) {
-
-            if (position[element] == NULLINDEX) {//if originally NULL
-                element_t &back = elements[n];//add new element to position n
-                back.key = key;
-                back.element = element;
-                position[element] = n;//set position id to n
-                sift_up(n++);
-            } else {//if already valid, update the value
-                node_t el_pos = position[element];//position information
-                element_t &el = elements[el_pos];//get the element
-                if (key > el.key) {//update the element
-//                if (key > el.key || (key <= el.key && element > el.element)) {//update the element || (elements[parent_i].key <= elements[cur_i].key && elements[parent_i].element > elements[cur_i].element)
-                    el.key = key;
-                    sift_down(el_pos);
-                } else {
-                    el.key = key;
-                    sift_up(el_pos);
-                }
-            }
-        }
-
-        // Clear the heap.
-        inline void clear() {
-            for (node_t i = 0; i < n; ++i) {
-                position[elements[i].element] = NULLINDEX;
-            }
-            n = 0;
-        }
-
-        // Cheaper erase.
-        inline void erase(node_t v) {
-            position[v] = NULLINDEX;
-        }
-
-        inline void clear_n() {
-            n = 0;
-        }
-
-        // Test whether an element is contained in the heap.
-        inline bool contains(const node_t element) const {
-            return position[element] != NULLINDEX;
-        }
-
-        //return current elements information
-        void get_elements(std::vector<std::pair<int,int>> &e_vector){
-            std::pair<int,int> temp_pair;
-
-            for(int i=0;i<n;i++){
-                temp_pair.first = elements[i].key;
-                temp_pair.second = elements[i].element;
-                e_vector.push_back(temp_pair);
-            }
-        }
-
-    protected:
-
-        // Sift up an element.
-        inline void sift_up(node_t i) {
-            assert(i < n);
-            node_t cur_i = i;
-            while (cur_i > 0) {
-                node_t parent_i = (cur_i - 1) >> log_k;//equals (cur_i - 1)/(2^log_k)
-                if (elements[parent_i].key > elements[cur_i].key)//compare with parent node, if smaller, then swap
-//                if (elements[parent_i].key > elements[cur_i].key || (elements[parent_i].key <= elements[cur_i].key && elements[parent_i].element > elements[cur_i].element))//compare with parent node, if smaller, then swap
-                    swap(cur_i, parent_i);
-                else
-                    break;
-                cur_i = parent_i;
-            }
-        }
-
-        // Sift down an element.
-        inline void sift_down(node_t i) {
-            assert(i < n);
-
-            while (true) {
-                node_t min_ind = i;
-                key_t min_key = elements[i].key;
-
-                node_t child_ind_l = (i << log_k) + 1;//equals i*2^log_k + 1
-                node_t child_ind_u = std::min(child_ind_l + k, n);//equals min(child_ind_l+4,n)
-
-                for (node_t j = child_ind_l; j < child_ind_u; ++j) {
-                    if (elements[j].key < min_key) {
-//                    if (elements[j].key < min_key || (elements[j].key >= min_key && elements[j].element < elements[i].element)) {
-                        min_ind = j;
-                        min_key = elements[j].key;
-                    }
-                }
-
-                // Exchange?
-                if (min_ind != i) {
-                    swap(i, min_ind);
-                    i = min_ind;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        // Swap two elements in the heap.
-        inline void swap(const node_t i, const node_t j) {
-            element_t &el_i = elements[i];
-            element_t &el_j = elements[j];
-
-            // Exchange positions
-            position[el_i.element] = j;
-            position[el_j.element] = i;
-
-            // Exchange elements
-            element_t temp = el_i;
-            el_i = el_j;
-            el_j = temp;
-        }
-
-    private:
-
-        // Number of elements in the heap.
-        node_t n;
-
-        // Number of maximal elements.
-        node_t max_n;
-
-        // Array of length heap_elements.
-        std::vector<element_t> elements;
-
-        // An array of positions for all elements.
-        std::vector<node_t> position;
-    };
-}
 
 #endif //HEAD_H
