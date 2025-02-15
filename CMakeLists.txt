@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(ShortestPath)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 11)
 
 # boost
 find_package(Boost 1.71.0 COMPONENTS system filesystem REQUIRED)
@@ -12,10 +12,23 @@ if (Boost_FOUND)
     include_directories(${Boost_INCLUDE_DIRS})
     link_directories(${Boost_LIBRARY_DIRS})
 endif ()
+# openMP
+find_package(OpenMP)
+if (OPENMP_FOUND)
+    message(STATUS "OpenMP find.")
+    message(STATUS "OpenMP_C_FLAGS: ${OpenMP_C_FLAGS}")
+    message(STATUS "OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
+    message(STATUS "OpenMP_EXE_LINKER_FLAGS: ${OpenMP_EXE_LINKER_FLAGS}")
+    message(STATUS "OPENMP_INCLUDE_DIRS: ${OPENMP_INCLUDE_DIRS}")
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+endif()
+
 
 add_definitions(-w) # omit warning information
 
-add_executable(SP main.cpp Founda.hpp IndexFree.hpp IndexBased.hpp)
+add_executable(SP main.cpp Founda.hpp IndexFree.hpp)
 add_executable(Preprocess mainPre.cpp Preprocess.hpp)
 
 if (Boost_FOUND)
